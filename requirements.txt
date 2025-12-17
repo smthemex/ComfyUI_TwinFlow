@@ -3,4 +3,5 @@ accelerate
 transformers
 tokenizers
 tqdm
+gguf
 

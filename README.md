@@ -2,7 +2,7 @@
 [TwinFlow](https://github.com/inclusionAI/TwinFlow): Realizing One-step Generation on Large Models with Self-adversarial Flows,you can use it in comfyUI
 
 # Tips
-* infer 1027*768 in 12G Vram just need 27.9s / 12G显存 开GPU卸载 单图只需要27.9秒
+* infer 1027*768 in 12G Vram just need 27.9s / 12G显存 开GPU卸载 单图只需要15秒
 
 # Example
 ![](https://github.com/smthemex/ComfyUI_TwinFlow/blob/main/example_workflows/example.png)

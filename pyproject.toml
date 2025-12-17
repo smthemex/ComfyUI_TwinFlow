@@ -1,0 +1,16 @@
+[project]
+name = "twinflow"
+description = "twinflow:Realizing One-step Generation on Large Models with Self-adversarial Flows,you can use it in comfyUI"
+version = "1.0.0"
+license = {file = "LICENSE"}
+dependencies = ["diffusers", "accelerate", "transformers", "tokenizers", "tqdm"]
+
+[project.urls]
+Repository = "https://github.com/smthemex/ComfyUI_TwinFlow"
+#  Used by Comfy Registry https://registry.comfy.org
+
+[tool.comfy]
+PublisherId = "smthemex"
+DisplayName = "ComfyUI_TwinFlow"
+Icon = ""
+includes = []

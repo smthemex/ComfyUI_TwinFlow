@@ -104,7 +104,10 @@ class QwenImageTransformer2DModelWrapper(QwenImageTransformer2DModel):
                 logger.warning(
                     "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
                 )
-
+        hd_dtyep=next(self.img_in.parameters()).dtype
+        
+        if hd_dtyep!=hidden_states.dtype:
+            hidden_states=hidden_states.to(hd_dtyep)
         hidden_states = self.img_in(hidden_states)
 
         timestep = timestep.to(hidden_states.dtype)

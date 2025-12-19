@@ -316,8 +316,10 @@ class QwenImage(torch.nn.Module):
             ) = self.encode_prompt(prompts, do_cfg)
             batch_size = len(prompts)
         else:
-            prompt_embeds.to(self.transformer.transformer.device,self.imgs_dtype)
-            prompt_attention_mask.to(self.transformer.transformer.device,self.imgs_dtype)
+            model_device = next(self.transformer.transformer.parameters()).device
+            #print(model_device)
+            prompt_embeds.to(model_device,self.imgs_dtype)
+            prompt_attention_mask.to(model_device,self.imgs_dtype)
             batch_size=prompt_embeds.shape[0]
 
 

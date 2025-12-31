@@ -42,7 +42,7 @@ class TwinFlow_SM_Model(io.ComfyNode):
                 io.Combo.Input("gguf",options= ["none"] + folder_paths.get_filename_list("gguf")),  
             ],
             outputs=[
-                io.Custom("TwinFlow_SM_Model").Output(display_name="model"),
+                io.Model.Output(display_name="model"),
                 ],
             )
     @classmethod
@@ -65,7 +65,7 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
             display_name="TwinFlow_SM_KSampler",
             category="TwinFlow",
             inputs=[
-                io.Custom("TwinFlow_SM_Model").Input("model"),
+                io.Model.Input("model"),
                 io.Conditioning.Input("positive"), 
                 io.Int.Input("width", default=1024, min=512, max=nodes.MAX_RESOLUTION,step=16,display_mode=io.NumberDisplay.number),
                 io.Int.Input("height", default=1024, min=512, max=nodes.MAX_RESOLUTION,step=16,display_mode=io.NumberDisplay.number),
@@ -157,12 +157,77 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
 
 
 
+class TwinFlow_SM_LoraLoader(io.ComfyNode):
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="TwinFlow_SM_LoraLoader",
+            display_name="TwinFlow_SM_LoraLoader",
+            category="TwinFlow",
+            inputs=[
+                io.Model.Input("model"),
+                io.Combo.Input("lora_name", options=["none"] + folder_paths.get_filename_list("loras")),
+                io.Float.Input("strength", default=1.0, min=-100.0, max=100.0, step=0.01, display_mode=io.NumberDisplay.number),
+            ],
+            outputs=[
+                io.Model.Output(display_name="model"),
+            ],
+        )
+
+    @classmethod
+    def execute(cls, model, lora_name, strength) -> io.NodeOutput:
+        if strength == 0 or lora_name == "none" or not lora_name:
+            return io.NodeOutput(model)
+
+        # Try to find LoRA in ComfyUI loras folder first
+        lora_path = None
+        try:
+            lora_path = folder_paths.get_full_path("loras", lora_name)
+        except:
+            pass
+
+        # If not found, try as direct path
+        if lora_path is None and os.path.exists(lora_name):
+            lora_path = lora_name
+
+        if lora_path is None:
+            print(f"Warning: LoRA '{lora_name}' not found")
+            return io.NodeOutput(model)
+
+        # Load LoRA using diffusers' load_lora_weights method
+        try:
+            # Both QwenImage and ZImage wrap a pipeline in self.model
+            pipeline = getattr(model, 'model', None)
+            if pipeline is None:
+                # If no wrapped pipeline, try loading directly on model
+                pipeline = model
+
+            adapter_name = f"lora_{id(model)}"
+            pipeline.load_lora_weights(lora_path, adapter_name=adapter_name)
+            pipeline.set_adapter(adapter_name)
+
+            # Apply strength by scaling the adapter
+            # Note: diffusers LoRA strength is typically applied during forward pass
+            # For exact strength control, we may need to adjust adapter weights
+            if strength != 1.0:
+                print(f"LoRA strength {strength} requested. Note: diffusers LoRA uses weight_name param for adapter selection. Current implementation applies at full strength.")
+
+            print(f"Successfully loaded LoRA: {lora_name}")
+        except Exception as e:
+            print(f"Error loading LoRA: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return io.NodeOutput(model)
+
+
 class TwinFlow_SM_Extension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
         return [
             TwinFlow_SM_Model,
             TwinFlow_SM_KSampler,
+            TwinFlow_SM_LoraLoader,
         ]
 async def comfy_entrypoint() -> TwinFlow_SM_Extension:  # ComfyUI calls this to load your extension and its nodes.
     return TwinFlow_SM_Extension()

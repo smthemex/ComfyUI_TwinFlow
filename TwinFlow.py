@@ -72,7 +72,7 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
                 io.Combo.Input("steps", [2,4]),
                 io.Int.Input("seed", default=0, min=0, max=MAX_SEED,display_mode=io.NumberDisplay.number),
                 io.Int.Input("block_num", default=10, min=0, max=MAX_SEED,display_mode=io.NumberDisplay.number),
-                io.Combo.Input("force_offload", ["all", "none","clip"]),
+                io.Combo.Input("force_offload", ["all", "none","clip"], default="none"),
             ], # io.Float.Input("noise", default=0.0, min=0.0, max=1.0,step=0.01,display_mode=io.NumberDisplay.number),
             outputs=[
                 io.Latent.Output(display_name="latents"),

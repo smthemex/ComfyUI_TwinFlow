@@ -1,8 +1,25 @@
 import torch
 import torch.nn as nn
-from diffusers import ZImageTransformer2DModel
+from torch.nn.utils.rnn import pad_sequence
+from typing import Union, List, Optional, Dict, Any, Callable, Tuple
+
+# Try to import ZImageTransformer2DModel from diffusers, fall back to local implementation
+ZImageTransformer2DModel = None
+TimestepEmbedder = None
+
+try:
+    from diffusers.models.transformers import ZImageTransformer2DModel
+    from diffusers.models.transformers.transformer_z_image import TimestepEmbedder
+except ImportError:
+    try:
+        from diffusers import ZImageTransformer2DModel
+        from diffusers.models.transformers.transformer_z_image import TimestepEmbedder
+    except ImportError:
+        # Use local implementations
+        from .local_z_image_components import ZImageTransformer2DModelBase as ZImageTransformer2DModel
+        from .local_z_image_components import TimestepEmbedder
+
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
-from diffusers.models.transformers.transformer_z_image import TimestepEmbedder
 from diffusers.utils import (
     USE_PEFT_BACKEND,
     logging,
@@ -10,9 +27,6 @@ from diffusers.utils import (
     unscale_lora_layers,
 )
 from diffusers.configuration_utils import register_to_config
-from torch.nn.utils.rnn import pad_sequence
-
-from typing import Union, List, Optional, Dict, Any, Callable, Tuple
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 

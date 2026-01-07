@@ -48,7 +48,7 @@ class TwinFlow_SM_Model(io.ComfyNode):
     @classmethod
     def execute(cls, dit,gguf,) -> io.NodeOutput:
         dit_path=folder_paths.get_full_path("diffusion_models", dit) if dit != "none" else None
-        gguf_path=folder_paths.get_full_path("gguf", gguf) if gguf != "none" else None 
+        gguf_path=folder_paths.get_full_path("gguf", gguf) if gguf != "none" else None
 
         if any(path and 'qwen' in path.lower() for path in [dit_path, gguf_path]):
             model = QwenImage( os.path.join(node_cr_path, "Qwen-Image"),dit_path,gguf_path, aux_time_embed=True, device="cpu")   

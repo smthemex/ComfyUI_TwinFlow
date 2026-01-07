@@ -1,17 +1,26 @@
 import torch
 import os
+import diffusers
 # from diffusers import (
 #     ZImagePipeline,
 #     ZImageTransformer2DModel
 # )
 from diffusers import GGUFQuantizationConfig
 from peft import PeftModel
-from .transformer_z_image import ZImageTransformer2DModelWrapper,logger
+from .transformer_z_image import ZImageTransformer2DModelWrapper, ZImageTransformer2DModel, logger
 from .pipeline_z_image import ZImagePipeline
 from contextlib import contextmanager
 import sys
 from omegaconf import OmegaConf
 #from services.tools import create_logger
+
+# Permanently patch diffusers to include ZImageTransformer2DModel if not present
+if not hasattr(diffusers, 'ZImageTransformer2DModel'):
+    diffusers.ZImageTransformer2DModel = ZImageTransformer2DModel
+    # Also patch the models.transformers module if it exists
+    if hasattr(diffusers, 'models') and hasattr(diffusers.models, 'transformers'):
+        if not hasattr(diffusers.models.transformers, 'ZImageTransformer2DModel'):
+            diffusers.models.transformers.ZImageTransformer2DModel = ZImageTransformer2DModel
 
 @contextmanager
 def temp_patch_module_attr(module_name: str, attr_name: str, new_obj):
@@ -219,7 +228,12 @@ class ZImage(torch.nn.Module):
         else:
             raise ValueError(f"Unknown model type: {model_type}")
 
-        self.model.transformer.set_attention_backend("flash")    
+        # Try to use flash attention if available, otherwise fall back to default (SDPA)
+        try:
+            self.model.transformer.set_attention_backend("flash")
+        except Exception as e:
+            print(f"[TwinFlow] Flash attention not available, using default attention backend: {e}")
+            
         if lora_id is not None:
             self.model.transformer = PeftModel.from_pretrained(
                 self.model.transformer, lora_id, is_trainable=False

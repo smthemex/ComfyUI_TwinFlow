@@ -19,14 +19,29 @@ import torch
 from transformers import AutoTokenizer, PreTrainedModel
 
 from diffusers.image_processor import VaeImageProcessor
-from diffusers.loaders import FromSingleFileMixin, ZImageLoraLoaderMixin
 from diffusers.models.autoencoders import AutoencoderKL
-from diffusers.models.transformers import ZImageTransformer2DModel
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
 from diffusers.utils import logging, replace_example_docstring
 from diffusers.utils.torch_utils import randn_tensor
 from .pipeline_output import ZImagePipelineOutput
+
+# Try to import ZImageTransformer2DModel and loaders from diffusers, fall back to local/stubs
+try:
+    from diffusers.loaders import FromSingleFileMixin, ZImageLoraLoaderMixin
+    from diffusers.models.transformers import ZImageTransformer2DModel
+except ImportError:
+    try:
+        from diffusers.loaders import FromSingleFileMixin
+    except ImportError:
+        FromSingleFileMixin = object
+    
+    # Create a stub for ZImageLoraLoaderMixin if not available
+    class ZImageLoraLoaderMixin:
+        pass
+    
+    # Use local implementation
+    from .local_z_image_components import ZImageTransformer2DModelBase as ZImageTransformer2DModel
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name

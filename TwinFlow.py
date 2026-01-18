@@ -1,9 +1,11 @@
- # !/usr/bin/env python
+# !/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
 import numpy as np
 import torch
 import os
+import re
+import traceback
 from diffusers.hooks import apply_group_offloading
 from .diffusers_patch.modeling_qwen_image import QwenImage
 from .diffusers_patch.z_image.modeling_z_image import ZImage
@@ -28,11 +30,18 @@ if not os.path.exists(weigths_gguf_current_path):
 
 folder_paths.add_model_folder_path("gguf", weigths_gguf_current_path) #  cotyle dir
 
+# --- 辅助函数：规范化适配器名称 ---
+def get_safe_name(path):
+    base_name = os.path.splitext(os.path.basename(path))[0]
+    # 将中文、空格、特殊字符统一替换为下划线，防止 peft/diffusers 无法识别
+    safe_name = re.sub(r'[^\w]', '_', base_name)
+    if safe_name[0].isdigit():
+        safe_name = "lora_" + safe_name
+    return safe_name
 
 class TwinFlow_SM_Model(io.ComfyNode):
     @classmethod
     def define_schema(cls):
-        
         return io.Schema(
             node_id="TwinFlow_SM_Model",
             display_name="TwinFlow_SM_Model",
@@ -74,7 +83,7 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
                 io.Int.Input("block_num", default=10, min=0, max=MAX_SEED,display_mode=io.NumberDisplay.number),
                 io.Combo.Input("force_offload", ["all", "none","clip"], default="none"),
                 io.Combo.Input("sampling_style", ["any", "mul",], default="any"),
-            ], # io.Float.Input("noise", default=0.0, min=0.0, max=1.0,step=0.01,display_mode=io.NumberDisplay.number),
+            ], 
             outputs=[
                 io.Latent.Output(display_name="latents"),
             ],
@@ -82,7 +91,7 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
     @classmethod
     def execute(cls, model,positive,width,height,steps,seed,block_num,force_offload,sampling_style) -> io.NodeOutput:
         raw_embeds=positive[0][0]
-        if raw_embeds.dtype == torch.uint8 or not raw_embeds.is_floating_point(): #sometimes clip embeds are uint8 dtype @klossm
+        if raw_embeds.dtype == torch.uint8 or not raw_embeds.is_floating_point():
             raw_embeds = raw_embeds.to(torch.float32)
         batch_size, seq_len, _ = raw_embeds.shape
         prompt_attention_mask = torch.ones(batch_size, seq_len, dtype=torch.long, device=device)
@@ -94,22 +103,17 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
             try:
                 for pipe in cf_models:
                     if force_offload=="clip" and "AutoencodingEngine"==type(pipe.model).__name__: 
-                        print("pass vae offload")
                         continue
                     pipe.unpatch_model(device_to=torch.device("cpu"))
-                    print(f"Unpatching models.{pipe}")
             except: pass
 
         mm.soft_empty_cache()
         torch.cuda.empty_cache()
-        max_gpu_memory = torch.cuda.max_memory_allocated()
-        print(f"After Max GPU memory allocated: {max_gpu_memory / 1000 ** 3:.2f} GB")
        
         if 2>=steps:
-            # few
             stochast_ratio=0.8 if steps==1 else 1.0
             sampler_config = {
-                "sampling_steps": steps, #1,2
+                "sampling_steps": steps, 
                 "stochast_ratio": stochast_ratio,
                 "extrapol_ratio": 0.0,
                 "sampling_order": 1,
@@ -118,7 +122,6 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
                 "sampling_style": "few"
             }
         elif 2<steps and sampling_style=="any":
-            # any
             sampler_config = {
                 "sampling_steps": steps,
                 "stochast_ratio": 0.0,
@@ -128,9 +131,7 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
                 "rfba_gap_steps": [0.001, 0.5],
                 "sampling_style": sampling_style
                 }
-
         else:
-            # 2 NFE config
             sampler_config = {
                 "sampling_steps": steps,
                 "stochast_ratio": 0.0,
@@ -143,7 +144,6 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
 
         sampler = partial(UnifiedSampler().sampling_loop, **sampler_config)
         if block_num>0:
-        # apply offloading
             apply_group_offloading(model.transformer.transformer, onload_device=torch.device("cuda"), offload_type="block_level", num_blocks_per_group=block_num)
         else:
             model.model.to(device)
@@ -151,10 +151,10 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
             if hasattr(model.transformer, 'transformer'):
                 model.transformer.transformer.to(device)
             model.device = device
-        # infer
+
         demox = model.sample(
             None ,
-            cfg_scale=0.0, # should be zero
+            cfg_scale=0.0, 
             seed=seed,
             height=height,
             width=width,
@@ -163,13 +163,11 @@ class TwinFlow_SM_KSampler(io.ComfyNode):
             prompt_attention_mask=prompt_attention_mask,
             block_num=block_num,
         )
-        #print(demox.shape) #torch.Size([1, 16, 128, 96])
-        if len(demox.shape)!=5 and isinstance(model, QwenImage): #qwen need 5D
+        if len(demox.shape)!=5 and isinstance(model, QwenImage):
             demox=demox.unsqueeze(0) 
-        out={"samples":demox} #BCTHW
+        out={"samples":demox} 
 
         return io.NodeOutput(out)
-
 
 
 class TwinFlow_SM_LoraLoader(io.ComfyNode):
@@ -192,55 +190,66 @@ class TwinFlow_SM_LoraLoader(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, model, lora_1, lora_2,strength_1,strength_2) -> io.NodeOutput:
+    def execute(cls, model, lora_1, lora_2, strength_1, strength_2) -> io.NodeOutput:
+        # 1. 整理有效的 LoRA 路径和对应的权重
+        lora_configs = []
+        if lora_1 != "none":
+            path = folder_paths.get_full_path("loras", lora_1)
+            if path: lora_configs.append({"path": path, "scale": strength_1, "name": get_safe_name(path)})
+        
+        if lora_2 != "none":
+            path = folder_paths.get_full_path("loras", lora_2)
+            if path: lora_configs.append({"path": path, "scale": strength_2, "name": get_safe_name(path)})
 
-        lora_1_path=folder_paths.get_full_path("loras", lora_1) if lora_1 != "none" else None
-        lora_2_path=folder_paths.get_full_path("loras", lora_2) if lora_2 != "none" else None
-        lora_list=[i for i in [lora_1_path,lora_2_path] if i is not None]  
-        lora_scales=[strength_1,strength_2]
+        # 获取模型中当前已有的适配器列表
+        try:
+            all_adapters_dict = model.model.get_list_adapters()
+            present_adapters = all_adapters_dict.get('transformer', [])
+        except:
+            present_adapters = []
 
-        if not  lora_list:
+        # 2. 清理不需要的适配器 (重要：防止干扰和 set() 报错)
+        needed_names = [c["name"] for c in lora_configs]
+        for old_name in present_adapters:
+            if old_name not in needed_names:
+                try:
+                    model.model.delete_adapters(old_name)
+                    print(f"[TwinFlow] 已卸载不再使用的 LoRA: {old_name}")
+                except: pass
+
+        if not lora_configs:
             return io.NodeOutput(model)
-        else:
+
+        # 3. 加载缺失的权重并记录激活列表
+        final_adapter_names = []
+        final_scales = []
+        
+        for config in lora_configs:
+            name = config["name"]
+            path = config["path"]
             
-            if len(lora_list)!=len(lora_scales): #sacles  
-                lora_scales = lora_scales[:1]
-            all_adapters = model.model.get_list_adapters()
-            dit_list=[]
-            if all_adapters:
-                dit_list= all_adapters['transformer']
-            adapter_name_list=[]
-            for path in lora_list:
-                if path is not None:
-                    name=os.path.splitext(os.path.basename(path))[0].replace(".", "_")
-                    adapter_name_list.append(name)
-                    if name in dit_list:
-                        continue
+            if name not in present_adapters:
+                print(f"[TwinFlow] 正在加载 LoRA: {name}")
+                try:
                     model.model.load_lora_weights(path, adapter_name=name)
-            print(f"成功加载LoRA权重: {adapter_name_list} (scale: {lora_scales})")        
-            model.model.set_adapters(adapter_name_list, adapter_weights=lora_scales)
-            try:
-                active_adapters = model.model.get_active_adapters()
-                all_adapters = model.model.get_list_adapters()
-                print(f"当前激活的适配器: {active_adapters}")
-                print(f"所有可用适配器: {all_adapters}") 
-            except:
-                pass
-            try:
-                dit_list= model.model.get_list_adapters()['transformer']
-                for name in dit_list:
-                    if lora_list :
-                        name_list=[os.path.splitext(os.path.basename(i))[0].replace(".", "_") for i in lora_list ]
-                        if name in name_list: #dit_list
-                            continue
-                        else:
-                            model.model.delete_adapters(name)
-                            print(f"去除dit中未加载的lora: {name}")  
-                    else:
-                        model.model.delete_adapters(name)
-            except:pass
+                except Exception as e:
+                    print(f"[TwinFlow] LoRA 加载失败 ({name}): {e}")
+                    traceback.print_exc()
+                    continue # 跳过加载失败的
 
-            return io.NodeOutput(model)
+            final_adapter_names.append(name)
+            final_scales.append(config["scale"])
+
+        # 4. 统一激活适配器
+        if final_adapter_names:
+            try:
+                print(f"[TwinFlow] 激活适配器: {final_adapter_names}, 权重: {final_scales}")
+                model.model.set_adapters(final_adapter_names, adapter_weights=final_scales)
+            except Exception as e:
+                print(f"[TwinFlow] 激活适配器失败: {e}")
+                traceback.print_exc()
+
+        return io.NodeOutput(model)
 
 
 class TwinFlow_SM_Extension(ComfyExtension):
@@ -251,5 +260,5 @@ class TwinFlow_SM_Extension(ComfyExtension):
             TwinFlow_SM_KSampler,
             TwinFlow_SM_LoraLoader,
         ]
-async def comfy_entrypoint() -> TwinFlow_SM_Extension:  # ComfyUI calls this to load your extension and its nodes.
+async def comfy_entrypoint() -> TwinFlow_SM_Extension:
     return TwinFlow_SM_Extension()

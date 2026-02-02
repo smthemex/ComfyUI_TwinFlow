@@ -284,7 +284,7 @@
       ],
       "size": [
         433.14424487610086,
-        82
+        106
       ],
       "flags": {},
       "order": 4,
@@ -304,7 +304,8 @@
       },
       "widgets_values": [
         "none",
-        "TwinFlow-Z-Image-Turbo-diffuser-Q8_0.gguf"
+        "TwinFlow-Z-Image-Turbo-diffuser-Q8_0.gguf",
+        false
       ]
     },
     {
@@ -474,38 +475,6 @@
       ]
     },
     {
-      "id": 1,
-      "type": "TwinFlow_SM_Model",
-      "pos": [
-        21393.07572862398,
-        -471.9521675169633
-      ],
-      "size": [
-        353.7272467794319,
-        82
-      ],
-      "flags": {},
-      "order": 5,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "model",
-          "type": "MODEL",
-          "links": [
-            15
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "TwinFlow_SM_Model"
-      },
-      "widgets_values": [
-        "none",
-        "TwinFlow-Qwen-Image-diffusers-fix-Q8_0.gguf"
-      ]
-    },
-    {
       "id": 3,
       "type": "CLIPTextEncode",
       "pos": [
@@ -541,29 +510,6 @@
       "widgets_values": [
         "Qwen Anime,超高清壁纸, 梦幻光影, 少女在元宵灯会中回眸一笑, 提着一盏兔子花灯, 周围挂满明亮的灯笼, 暖色调灯光映照在脸上, 华丽的唐装, 繁复的头饰, 热闹的背景虚化, 焦外光斑美丽, 中景镜头。"
       ]
-    },
-    {
-      "id": 17,
-      "type": "Note",
-      "pos": [
-        21797.18761292484,
-        -734.2085285008843
-      ],
-      "size": [
-        438.7752044601257,
-        125.6648744857091
-      ],
-      "flags": {},
-      "order": 6,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {},
-      "widgets_values": [
-        "if use lora  add trigger words\n如果使用lora，模型如果有关键词，记得加"
-      ],
-      "color": "#432",
-      "bgcolor": "#653"
     },
     {
       "id": 16,
@@ -604,6 +550,62 @@
         0.5,
         1
       ]
+    },
+    {
+      "id": 1,
+      "type": "TwinFlow_SM_Model",
+      "pos": [
+        21381.15755208625,
+        -496.9803382461872
+      ],
+      "size": [
+        353.7272467794319,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "TwinFlow_SM_Model"
+      },
+      "widgets_values": [
+        "none",
+        "TwinFlow-Qwen-Image-diffusers-fix-Q8_0.gguf",
+        false
+      ]
+    },
+    {
+      "id": 17,
+      "type": "Note",
+      "pos": [
+        21797.18761292484,
+        -734.2085285008843
+      ],
+      "size": [
+        438.7752044601257,
+        125.6648744857091
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {},
+      "widgets_values": [
+        "if use lora  add trigger words\n如果使用lora，模型如果有关键词，记得加\nqwen don't support dype now\n千问的dype暂时未启用，还有点问题"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
     }
   ],
   "links": [
@@ -751,13 +753,13 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 1.2284597357368872,
+      "scale": 1.635079908265798,
       "offset": [
-        -21297.635207058658,
-        664.624749635273
+        -21290.183064811426,
+        763.4575236700027
       ]
     },
-    "frontendVersion": "1.36.14",
+    "frontendVersion": "1.37.11",
     "workflowRendererVersion": "LG",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,

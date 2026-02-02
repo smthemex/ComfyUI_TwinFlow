@@ -191,6 +191,7 @@ class ZImage(torch.nn.Module):
         max_sequence_length=1024,
         device="cuda",
         lora_id=None,
+        use_dype=False,
     ) -> None:
         super().__init__()
 
@@ -198,13 +199,13 @@ class ZImage(torch.nn.Module):
          #if aux_time_embed:
         with temp_patch_module_attr("diffusers", "ZImageTransformer2DModel", ZImageTransformer2DModel):
             if dit_path is not None:
-                z_image_transformer = ZImageTransformer2DModel.from_single_file(dit_path,config=os.path.join(model_id, "transformer"),torch_dtype=torch.bfloat16)  
+                z_image_transformer = ZImageTransformer2DModel.from_single_file(dit_path,config=os.path.join(model_id, "transformer"),torch_dtype=torch.bfloat16,dype=use_dype)  
             elif gguf_path is not None:
                 z_image_transformer = ZImageTransformer2DModel.from_single_file(
                     gguf_path,
                     config=os.path.join(model_id, "transformer"),
                     quantization_config=GGUFQuantizationConfig(compute_dtype=torch.bfloat16),
-                    torch_dtype=torch.bfloat16,) 
+                    torch_dtype=torch.bfloat16,dype=use_dype) 
             else:
                 raise ValueError("Please provide either dit_path or gguf_path")
 

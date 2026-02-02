@@ -49,20 +49,21 @@ class TwinFlow_SM_Model(io.ComfyNode):
             inputs=[
                 io.Combo.Input("dit",options= ["none"] + folder_paths.get_filename_list("diffusion_models") ),
                 io.Combo.Input("gguf",options= ["none"] + folder_paths.get_filename_list("gguf")),  
+                io.Boolean.Input("use_dype", default=False),
             ],
             outputs=[
                 io.Model.Output(display_name="model"),
                 ],
             )
     @classmethod
-    def execute(cls, dit,gguf,) -> io.NodeOutput:
+    def execute(cls, dit,gguf,use_dype) -> io.NodeOutput:
         dit_path=folder_paths.get_full_path("diffusion_models", dit) if dit != "none" else None
         gguf_path=folder_paths.get_full_path("gguf", gguf) if gguf != "none" else None
 
         if any(path and 'qwen' in path.lower() for path in [dit_path, gguf_path]):
             model = QwenImage( os.path.join(node_cr_path, "Qwen-Image"),dit_path,gguf_path, aux_time_embed=True, device="cpu")   
         else:
-            model = ZImage( os.path.join(node_cr_path, "Z-Image"),dit_path,gguf_path, aux_time_embed=True, device="cpu")
+            model = ZImage( os.path.join(node_cr_path, "Z-Image"),dit_path,gguf_path, aux_time_embed=True, device="cpu",use_dype=use_dype)
         return io.NodeOutput(model)
 
 

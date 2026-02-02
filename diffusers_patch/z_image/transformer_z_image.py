@@ -284,9 +284,201 @@ class FinalLayer(nn.Module):
         x = self.norm_final(x) * scale.unsqueeze(1)
         x = self.linear(x)
         return x
+    
+class RopeEmbedder(nn.Module):
+    """
+    Z-Image RoPE embedder with DyPE support and enhanced aspect ratio handling
+    """
+    def __init__(
+        self,
+        theta: float = 256.0,
+        axes_dims: List[int] = (16, 56, 56),
+        axes_lens: List[int] = (64, 128, 128),
+        dype: bool = False,  
+    ):
+        super().__init__()
+        self.theta = theta
+        self.axes_dims = axes_dims
+        self.dype = dype  # Enable DyPE by default
+
+        self.current_timestep = 1.0  # 1.0 = pure noise, 0.0 = clean image
+        self.base_resolution = 1024  
+        self.patch_size = 16
+        self.base_patches = self.base_resolution // self.patch_size  # 64
+
+        # DyPE specific parameters - more conservative settings
+        self.dype_start_sigma = 0.95  # Start DyPE earlier - NOW ACTUALLY USED
+        self.dype_end_sigma = 0.70  # End DyPE later - NOW ACTUALLY USED
+        self.dype_exponent = 1.0      # Reduced exponent to make DyPE less aggressive
+        self.dype_scale = 1.0         # Scale factor for DyPE
+
+    def set_timestep(self, timestep: float):
+        """Set current timestep for DyPE. 
+        Timestep is normalized to [0, 1] range where 1.0 = pure noise, 0.0 = clean image."""
+        if self.dype:
+            self.current_timestep = timestep
+
+    def rope_params(self, index, dim, device=None):
+        """Basic RoPE parameter calculation"""
+        assert dim % 2 == 0
+        if device is None:
+            device = index.device if isinstance(index, torch.Tensor) else torch.device('cpu')
+
+        if not isinstance(index, torch.Tensor):
+            index = torch.tensor(index, device=device)
+        else:
+            index = index.to(device)
+
+        theta_tensor = torch.tensor(self.theta, dtype=torch.float32, device=device)
+        arange_tensor = torch.arange(0, dim, 2, dtype=torch.float32, device=device)
+
+        freqs = torch.outer(index.float(), 1.0 / torch.pow(theta_tensor, arange_tensor / dim))
+        freqs = torch.polar(torch.ones_like(freqs), freqs)
+        return freqs
+
+    @staticmethod
+    def find_newbase_ntk(dim, base, scale):
+        """Calculate the new base for NTK-aware scaling."""
+        return base * (scale ** (dim / (dim - 2)))
+
+    @staticmethod
+    def find_correction_range(low_ratio, high_ratio, dim, base, ori_max_pe_len):
+        """Find the correction range for NTK-by-parts interpolation."""
+        import numpy as np
+        low = np.floor((dim * math.log(ori_max_pe_len / (low_ratio * 2 * math.pi))) / (2 * math.log(base)))
+        high = np.ceil((dim * math.log(ori_max_pe_len / (high_ratio * 2 * math.pi))) / (2 * math.log(base)))
+        return max(low, 0), min(high, dim - 1)
+
+    @staticmethod
+    def linear_ramp_mask(min_val, max_val, dim, device=None):
+        if min_val == max_val:
+            max_val += 0.001  # Prevent singularity
+
+        linear_func = (torch.arange(dim, dtype=torch.float32, device=device) - min_val) / (max_val - min_val)
+        ramp_func = torch.clamp(linear_func, 0, 1)
+        return ramp_func
+    
+    def init_scale_rope(self, scale=1.0):
+        """
+        Initialize scale for rope considering both dimensions equally
+        """
+        self.input_scale = max(scale, 1.0)
 
 
-class RopeEmbedder:
+    def get_scale(self, h_patches, w_patches):
+        self.h_patches = h_patches
+        self.w_patches = w_patches
+
+    def rope_params_yarn(self, index, dim, device, axis_idx=0):
+        """Enhanced YARN with balanced DyPE across all spatial dimensions"""
+
+       
+        if hasattr(self, 'input_scale') and self.input_scale > 1.0:
+            current_patches = self.input_scale * min(self.h_patches, self.w_patches)
+        else:
+            current_patches = min(self.h_patches, self.w_patches)
+
+
+        if current_patches <= self.base_patches or not self.dype:
+            return self.rope_params(index, dim, device=device)
+
+        scale = max(1.0, current_patches / self.base_patches)
+
+        # YARN parameters
+        beta_0 = 1.25
+        beta_1 = 0.75
+        gamma_0 = 16
+        gamma_1 = 2
+
+        if not isinstance(index, torch.Tensor):
+            index = torch.tensor(index, device=device, dtype=torch.float32)
+        else:
+            index = index.to(device).float()
+
+        theta_tensor = torch.tensor(self.theta, dtype=torch.float32, device=device)
+        arange_tensor = torch.arange(0, dim, 2, dtype=torch.float32, device=device)
+
+        freqs_base = torch.outer(
+            index,
+            1.0 / torch.pow(theta_tensor, arange_tensor / dim)
+        )
+
+        freqs_linear = torch.outer(
+            index,
+            1.0 / (scale * torch.pow(theta_tensor, arange_tensor / dim))
+        )
+
+        new_base = self.find_newbase_ntk(dim, self.theta, scale)
+        new_base_tensor = torch.tensor(new_base, dtype=torch.float32, device=device)
+        freqs_ntk = torch.outer(
+            index,
+            1.0 / torch.pow(new_base_tensor, arange_tensor / dim)
+        )
+        # CRITICAL FIX: 使用统一的DyPE参数，确保所有维度的一致性
+        if self.dype:
+            beta_0 = beta_0 ** (2.0 * (self.current_timestep ** 2.0))
+            beta_1 = beta_1 ** (2.0 * (self.current_timestep ** 2.0))
+        
+        # 第一次插值：线性和NTK之间
+        low, high = self.find_correction_range(beta_0, beta_1, dim, self.theta, self.base_patches)
+        low = max(0, low)
+        high = min(dim // 2, high)
+
+        freqs_mask = (1 - self.linear_ramp_mask(low, high, dim // 2, device=device))
+        freqs = freqs_linear * (1 - freqs_mask.unsqueeze(0)) + freqs_ntk * freqs_mask.unsqueeze(0)
+
+        if self.dype:
+            gamma_0 = gamma_0 ** (2.0 * (self.current_timestep ** 2.0))
+            gamma_1 = gamma_1 ** (2.0 * (self.current_timestep ** 2.0))
+        # 第二次插值：结果和基础之间
+        low, high = self.find_correction_range(gamma_0, gamma_1, dim, self.theta, self.base_patches)
+        low = max(0, low)
+        high = min(dim // 2, high)
+
+        freqs_mask = (1 - self.linear_ramp_mask(low, high, dim // 2, device=device))
+        freqs = freqs * (1 - freqs_mask.unsqueeze(0)) + freqs_base * freqs_mask.unsqueeze(0)
+
+        freqs_complex = torch.polar(torch.ones_like(freqs), freqs)
+
+        # Apply scaling correction if scale > 1
+        if scale > 1:
+            mscale = 0.1 * math.log(scale) + 1.0
+            freqs_complex = freqs_complex * mscale
+
+        return freqs_complex
+
+        
+    def forward(
+        self,
+        pos_ids: torch.Tensor,  
+        device: torch.device = None,
+    ):
+        """
+        Compute RoPE with enhanced DyPE adjustment based on timestep and spatial resolution
+        """
+        device = device or pos_ids.device
+
+        assert pos_ids.ndim == 2
+        assert pos_ids.shape[-1] == 3  # F, H, W 
+
+        result = []
+        pos = pos_ids.float()
+
+        for i in range(3):  
+            index = pos[:, i]
+            if self.dype: #i > 0:  # Apply scaling for height and width dimensions
+                # Create mask to distinguish positive and negative indices
+               if self.dype:  
+                freqs_complex = self.rope_params_yarn(
+                    index, self.axes_dims[i],  device, axis_idx=i)
+            else:
+                freqs_complex = self.rope_params(index, self.axes_dims[i], device)
+
+            result.append(freqs_complex)
+
+        return torch.cat(result, dim=-1)
+
+class RopeEmbedder_:
     def __init__(
         self,
         theta: float = 256.0,
@@ -356,6 +548,7 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
         t_scale=1000.0,
         axes_dims=[32, 48, 48],
         axes_lens=[1024, 512, 512],
+        dype: bool = True,  
     ) -> None:
         super().__init__()
         self.in_channels = in_channels
@@ -364,11 +557,11 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
         self.all_f_patch_size = all_f_patch_size
         self.dim = dim
         self.n_heads = n_heads
-
+        self.dype = dype
         self.rope_theta = rope_theta
         self.t_scale = t_scale
         self.gradient_checkpointing = False
-
+        
         assert len(all_patch_size) == len(all_f_patch_size)
 
         all_x_embedder = {}
@@ -427,7 +620,7 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
         self.axes_dims = axes_dims
         self.axes_lens = axes_lens
 
-        self.rope_embedder = RopeEmbedder(theta=rope_theta, axes_dims=axes_dims, axes_lens=axes_lens)
+        self.rope_embedder = RopeEmbedder(theta=rope_theta, axes_dims=axes_dims, axes_lens=axes_lens,dype = dype)
 
     def unpatchify(self, x: List[torch.Tensor], size: List[Tuple], patch_size, f_patch_size) -> List[torch.Tensor]:
         pH = pW = patch_size
@@ -505,7 +698,7 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
             C, F, H, W = image.size()
             all_image_size.append((F, H, W))
             F_tokens, H_tokens, W_tokens = F // pF, H // pH, W // pW
-
+            self.rope_embedder.get_scale( H_tokens, W_tokens)
             image = image.view(C, F_tokens, pF, H_tokens, pH, W_tokens, pW)
             # "c f pf h ph w pw -> (f h w) (pf ph pw c)"
             image = image.permute(1, 3, 5, 2, 4, 6, 0).reshape(F_tokens * H_tokens * W_tokens, pF * pH * pW * C)
@@ -569,7 +762,11 @@ class ZImageTransformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOr
     ):
         assert patch_size in self.all_patch_size
         assert f_patch_size in self.all_f_patch_size
-
+        if self.dype:
+            # 归一化时间步到[0,1]范围，1表示纯噪声
+            normalized_timestep = (t / self.t_scale).clamp(0.0, 1.0)
+            normalized_timestep = 1.0 - normalized_timestep
+            self.rope_embedder.set_timestep(normalized_timestep)
         bsz = len(x)
         device = x[0].device
         t = t * self.t_scale

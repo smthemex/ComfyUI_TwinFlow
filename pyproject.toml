@@ -3,7 +3,9 @@ name = "twinflow"
 description = "twinflow:Realizing One-step Generation on Large Models with Self-adversarial Flows,you can use it in comfyUI"
 version = "1.0.0"
 license = {file = "LICENSE"}
-dependencies = ["diffusers", "accelerate", "transformers", "tokenizers", "tqdm"]
+# Core nodes use ComfyUI's native DiT flow only - no extra pip deps.
+# GGUF support is provided by the optional external ComfyUI_Dif_GGUF plugin.
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/smthemex/ComfyUI_TwinFlow"
